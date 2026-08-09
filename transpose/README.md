@@ -16,6 +16,7 @@ nvcc -O3 -lineinfo -std=c++17 -arch=sm_87 transpose_v0.cu -o build/transpose_v0
 |---|---|---:|---:|---:|---:|---|
 | v0 | 每线程复制一个元素，读取合并、写入跨行 | 8.879 ms | 1.00× | 15.12 GB/s | 14.76% | 全局写每请求 32 sectors，78% L2 sectors 多余 |
 | v1 | `32×32` shared tile，全局读写均合并 | 2.418 ms | 3.67× | 55.51 GB/s | 54.21% | 全局访问已为 4 sectors/request；shared load 为 32.5-way bank conflict |
+| v2 | shared tile padding 为 `32×33` | **1.417 ms** | **6.26×** | **94.70 GB/s** | **92.48%** | shared load 冲突从 32.5-way 降至 1.1-way；接近内存带宽上限 |
 
 峰值带宽按锁定 EMC 3199 MHz、128-bit LPDDR5、DDR 传输计算为约
 102.4 GB/s。CUDA 在该 Jetson 上报告的 `memoryClockRate` 与 GPU 1020 MHz
@@ -23,3 +24,4 @@ nvcc -O3 -lineinfo -std=c++17 -arch=sm_87 transpose_v0.cu -o build/transpose_v0
 
 完整数据与 Nsight 证据见 [`reports/v0.md`](reports/v0.md)。
 v1 的全局事务与 shared bank conflict 对比见 [`reports/v1.md`](reports/v1.md)。
+v2 的 padding 对照实验见 [`reports/v2.md`](reports/v2.md)。
