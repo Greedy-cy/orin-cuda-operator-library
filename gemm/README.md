@@ -21,6 +21,7 @@ nvcc -O3 -lineinfo -std=c++17 -arch=sm_87 gemm_v0.cu -o build/gemm_v0 -lcublas
 | v3 | 对齐主路径以 `float4` 加载 A/B tile 并写回 C；非对齐回退 v2 | 137.840 ms | 997.089 GFLOP/s | 5.84× | 73.56% | 执行指令较 v2 降 33.5%，uncoalesced store 警告消失；64-register 限制 occupancy，内存吞吐回升至 86.3% |
 | v4 | 两份 shared tile；下一 tile 预取至寄存器，与当前 tile 计算交错 | 135.186 ms | 1,016.669 GFLOP/s | 5.96× | 75.04% | 较 v3 仅快 1.96%；指令反增 5.4%，但 eligible warp 改善；收益低于 3% 阈值 |
 | v5 | Ampere `cp.async` 两级流水，global→shared 不经通用寄存器 | 127.726 ms | 1,076.048 GFLOP/s | 6.31× | 79.39% | 较 v4 快 5.84%；60 registers、无 spill；NCU 转而指出 shared access wavefront 冗余 |
+| v6 | 有限配置扫描；regular-M 选 `128×64×16/8×4`，另加 M=1/16 专用配置 | **115.418 ms** | **1,190.795 GFLOP/s** | **6.98×** | **87.86%** | 107 registers、32.6% occupancy，但 issue slots 71.6%；五次跨进程结果跨度仅 0.036% |
 
 完整的形状矩阵、正确性、sanitizer 与 Nsight 证据见
 [`reports/v0.md`](reports/v0.md)；shared-memory 复用的收益和剩余瓶颈见
@@ -28,10 +29,12 @@ nvcc -O3 -lineinfo -std=c++17 -arch=sm_87 gemm_v0.cu -o build/gemm_v0 -lcublas
 [`reports/v2.md`](reports/v2.md)；向量化主路径、标量回退与 sector 改善见
 [`reports/v3.md`](reports/v3.md)；同步双缓冲的小收益、资源变化和长重复复验见
 [`reports/v4.md`](reports/v4.md)；`cp.async` 的同步审计和流水收益见
-[`reports/v5.md`](reports/v5.md)。
+[`reports/v5.md`](reports/v5.md)；配置资源表、跨形状筛选、dispatcher 和稳定性见
+[`reports/v6.md`](reports/v6.md)。
 
 ## 当前选择
 
-v5 是当前 FP32 最快版本。下一版模板化同一个 `cp.async` kernel，扫描
-BM/BN/BK/TM/TN 的少量有依据候选，比较方阵与 LLM M=128/512/1024；不进行
-无边界的参数穷举。v6 选定 Orin FP32 最终配置后，再进入 FP16 Tensor Core 路线。
+v6 是 FP32 最终 standalone 版本。自动 dispatcher 选择：M=1 使用
+`1×256×16/1×1`，M≤16 使用 `16×128×16/1×8`，其余对齐形状使用
+`128×64×16/8×4`；任意非对齐尺寸回退到标量边界 kernel。FP32 路线在此收口，
+下一阶段 v7/v8 转向 FP16 Tensor Core，不再用 FP32 CUDA core 数据混充结果。
