@@ -97,6 +97,9 @@ __global__ void softmax_shared_kernel(const float* input, float* output,
     output[row_offset + col] = value;
     thread_sum += value;
   }
+  // All warps must consume shared[0] (row_max) before shared memory is reused
+  // for the sum reduction. Without this barrier racecheck reports a WAR race.
+  __syncthreads();
   shared[lane] = thread_sum;
   __syncthreads();
 

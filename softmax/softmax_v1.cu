@@ -112,6 +112,9 @@ __device__ float block_reduce_sum(float value, float* warp_results) {
   const int warp = threadIdx.x / warpSize;
   const int warp_count = (blockDim.x + warpSize - 1) / warpSize;
 
+  // The same shared array held the preceding max result. Ensure every warp has
+  // consumed it before lane zero of each warp starts overwriting the array.
+  __syncthreads();
   value = warp_reduce_sum(value);
   if (lane == 0) {
     warp_results[warp] = value;

@@ -101,6 +101,8 @@ __device__ float block_reduce_max(float value, float* shared) {
 __device__ float block_reduce_sum(float value, float* shared) {
   const int lane = threadIdx.x & 31;
   const int warp = threadIdx.x >> 5;
+  // Separate consumption of the max result from reuse of shared memory for sum.
+  __syncthreads();
   value = warp_reduce_sum(value);
   if (lane == 0) shared[warp] = value;
   __syncthreads();
