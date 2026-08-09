@@ -25,6 +25,8 @@ nvcc -O3 -lineinfo -std=c++17 -arch=sm_87 softmax_v0.cu -o build/softmax_v0
 | 版本 | 优化点 | 主尺寸耗时 | 相对 v0 | 有效 I/O 带宽 | 关键瓶颈 |
 |---|---|---:|---:|---:|---|
 | v0 | 两次 shared tree reduction，中间指数值写全局内存 | 0.668 ms | 1.00× | 50.21 GB/s | Compute/Memory 约 60% 均衡；16 次 block 同步和中间全局读写都有优化空间 |
+| v1 | warp shuffle + warp 结果二级规约 | 0.594 ms | 1.13× | 56.49 GB/s | 指令下降 27%，转为 Memory 67.3% 主导；中间指数值仍全局往返 |
 
 主尺寸为 `rows=4096, cols=1024`，锁定 GPU 1020 MHz、EMC 3199 MHz。
 完整正确性、性能和 Nsight 记录见 [`reports/v0.md`](reports/v0.md)。
+v1 的完整对比见 [`reports/v1.md`](reports/v1.md)。
