@@ -41,6 +41,7 @@ nsys profile --trace=cuda,nvtx,osrt --sample=none \
 | v1 | shared-memory tree reduction，每 block 一次 atomic | 1.473 ms | 1.02× | 45.55 GB/s | atomic 数量下降但大尺寸仍有 91.7% L1TEX scoreboard 等待 |
 | v2 | shared reduction 尾部改用 warp shuffle | 1.473 ms | 1.02× | 45.55 GB/s | occupancy 提高到 88.7%，但 scoreboard 等待仍为 91.8% |
 | v3 | 四个独立累加器提供 load/add ILP | 0.718 ms | 2.09× | 93.43 GB/s | 内存吞吐升至 75.7%，转为接近硬件带宽上限的 memory-bound kernel |
+| v4 | `float4` 128-bit 加载 + 标量 tail | 0.723 ms | 2.08× | 92.78 GB/s | 指令减少但 MLP 被合并为单条向量 load，主尺寸比 v3 慢 0.7% |
 
 测试条件：Jetson Orin Nano Super、MAXN_SUPER、GPU 1020 MHz、EMC 3199 MHz、
 `N=16,777,216`、warmup 10 次、计时 30 次取 median。完整过程和 Nsight
@@ -54,4 +55,6 @@ warp shuffle 减少 shared-memory 访问和同步。实测主尺寸与 v1 持平
 [`reports/v2.md`](reports/v2.md)。v3 将保留 v2 的规约尾部，引入四个独立
 累加器，为标量全局加载提供 ILP。该假设得到验证，主尺寸提升约 2.05×，详见
 [`reports/v3.md`](reports/v3.md)。v4 将把四次标量加载改为一次 `float4`
-加载，验证在访存已基本合并时，减少 load 指令能否继续提高带宽。
+加载。该版本正确支持非 4 对齐长度，但主尺寸略慢，详见
+[`reports/v4.md`](reports/v4.md)。因此当前收口结论为：**v3 是大尺寸最终版本，
+v4 作为向量化负优化案例保留**。
