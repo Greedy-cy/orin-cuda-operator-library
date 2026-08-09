@@ -38,10 +38,14 @@ nsys profile --trace=cuda,nvtx,osrt --sample=none \
 | 版本 | 优化点 | 主尺寸耗时 | 相对 v0 | 有效带宽 | 关键瓶颈 |
 |---|---|---:|---:|---:|---|
 | v0 | grid-stride + 每线程一次 atomic | 1.504 ms | 1.00× | 44.61 GB/s | 91.9% 的发射间隔在等待 L1TEX scoreboard，atomic 竞争使 warp 无法就绪 |
+| v1 | shared-memory tree reduction，每 block 一次 atomic | 1.473 ms | 1.02× | 45.55 GB/s | atomic 数量下降但大尺寸仍有 91.7% L1TEX scoreboard 等待 |
 
 测试条件：Jetson Orin Nano Super、MAXN_SUPER、GPU 1020 MHz、EMC 3199 MHz、
 `N=16,777,216`、warmup 10 次、计时 30 次取 median。完整过程和 Nsight
 指标见 [`reports/v0.md`](reports/v0.md)。
 
-v0 的数据支持下一步使用 block 内 shared-memory reduction，把全局 atomic
-数量从“每个参与线程一次”减少为“每个 block 一次”。
+v0 的数据支持使用 block 内 shared-memory reduction，把全局 atomic 数量从
+“每个参与线程一次”减少为“每个 block 一次”。v1 在短输入上最高达到约 2.13×，
+但主尺寸只提升 2.1%，说明原假设只部分成立。完整分析见
+[`reports/v1.md`](reports/v1.md)。v2 将只替换 block reduction 的尾部，使用
+warp shuffle 减少 shared-memory 访问和同步，验证 reduction 尾部是否值得继续优化。
