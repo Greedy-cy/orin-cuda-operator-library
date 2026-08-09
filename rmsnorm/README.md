@@ -21,6 +21,8 @@ nvcc -O3 -lineinfo -std=c++17 -arch=sm_87 rmsnorm_v0.cu -o build/rmsnorm_v0
 |---|---|---:|---:|---:|---|
 | v0 | square/reduce/normalize/weight 四 kernel，两块中间缓冲 | 2.990 ms | 1.00× | 22.45 GB/s | 4 次 launch；约 9C 元素流量，相对融合理想 3C；四个 kernel 均受内存等待影响 |
 | v1 | 每行一 block，tree reduction 后直接归一化并乘 weight | 0.907 ms | 3.30× | 73.99 GB/s | launch 4→1、逻辑流量约 9C→4C；仍有 9 次全 block reduction barrier |
+| v2 | warp shuffle + warp 结果二级规约 | 0.897 ms | 3.33× | 74.85 GB/s | 指令较 v1 降 11.9%，主形状仅快 1.2%；长行已由内存流量主导 |
 
 完整正确性、逐形状性能与 Nsight 分解见 [`reports/v0.md`](reports/v0.md)。
 v1 的 fusion 收益与流量分析见 [`reports/v1.md`](reports/v1.md)。
+v2 的规约同步对照见 [`reports/v2.md`](reports/v2.md)。
