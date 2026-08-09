@@ -18,14 +18,16 @@ nvcc -O3 -lineinfo -std=c++17 -arch=sm_87 gemm_v0.cu -o build/gemm_v0 -lcublas
 | v0 | 每线程计算一个输出，直接从 global memory 读取 A/B | 805.372 ms | 170.653 GFLOP/s | 1.00× | 12.60% | K 循环中没有跨线程数据复用；L1/TEX throughput 96%，long scoreboard 占指令间隔约 59.7% |
 | v1 | `16×16` shared-memory tiling，仍为一线程一输出 | 563.534 ms | 243.888 GFLOP/s | 1.43× | 18.00% | long scoreboard 降至 41.7%，但每线程只累加一个输出，同步和加载指令相对 FMA 仍多 |
 | v2 | `64×64×16` block tile，每线程寄存器累加 `4×4` 输出 | 185.263 ms | 741.857 GFLOP/s | 4.35× | 54.74% | 寄存器使 occupancy 降到 64.5%；标量写回仅利用 8/32 bytes/sector，额外 sector 占 8% |
+| v3 | 对齐主路径以 `float4` 加载 A/B tile 并写回 C；非对齐回退 v2 | 137.840 ms | 997.089 GFLOP/s | 5.84× | 73.56% | 执行指令较 v2 降 33.5%，uncoalesced store 警告消失；64-register 限制 occupancy，内存吞吐回升至 86.3% |
 
 完整的形状矩阵、正确性、sanitizer 与 Nsight 证据见
 [`reports/v0.md`](reports/v0.md)；shared-memory 复用的收益和剩余瓶颈见
 [`reports/v1.md`](reports/v1.md)；寄存器分块的计算强度、occupancy 代价与写回问题见
-[`reports/v2.md`](reports/v2.md)。
+[`reports/v2.md`](reports/v2.md)；向量化主路径、标量回退与 sector 改善见
+[`reports/v3.md`](reports/v3.md)。
 
 ## 当前选择
 
-v2 已把计算重用提升到新的层级，但仍不是最终实现。下一版针对 NCU 指出的标量
-写回 sector 利用率，给对齐形状增加 `float4` 加载/写回路径，并保留非对齐标量
-回退；双缓冲和异步加载仍留到后续版本。
+v3 是当前 FP32 最优版本，但仍不是最终实现。下一版保持 v3 的 tile、寄存器分块和
+向量化，增加同步式双缓冲实验，检验加载/计算重叠与额外寄存器/shared-memory
+开销的权衡；如果是负优化也会保留完整证据。
