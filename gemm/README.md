@@ -40,14 +40,17 @@ nvcc -O3 -lineinfo -std=c++17 -arch=sm_87 gemm_v0.cu -o build/gemm_v0 -lcublas
 | 版本 | 优化点 | `4096³` | 性能 | 相对 v7 | FP16 cuBLAS 占比 | 关键瓶颈 |
 |---|---|---:|---:|---:|---:|---|
 | v7 | 一 warp 计算一个 `16×16×16` WMMA tile，直接从 global memory 加载 | 140.987 ms | 974.836 GFLOP/s | 1.00× | 12.29% | L1/TEX throughput 99.76%；long scoreboard 占 92.8%；跨 warp 不复用 A/B |
+| v8 | `128×128×16` block tile、每 warp 2×4 WMMA tiles、shared skew 与 cp.async 双缓冲 | **26.505 ms** | **5,185.455 GFLOP/s** | **5.32×** | **64.29%** | 115 registers 将 occupancy 限到 33.1%；仍有 global/shared excessive access，L2 throughput 88.7% |
 
 v7 的 FP16 精度口径、完整形状与 Nsight 证据见
-[`reports/v7.md`](reports/v7.md)。
+[`reports/v7.md`](reports/v7.md)。v8.0→v8.3 的逐步实验、否决项、最终全形状结果和
+Nsight 对照见 [`reports/v8.md`](reports/v8.md)。
 
 ## 当前选择
 
 v6 是 FP32 最终 standalone 版本。自动 dispatcher 选择：M=1 使用
 `1×256×16/1×1`，M≤16 使用 `16×128×16/1×8`，其余对齐形状使用
-`128×64×16/8×4`；任意非对齐尺寸回退到标量边界 kernel。FP16 v7 是刻意保留
-全局加载瓶颈的 WMMA baseline；v8 将加入 block-level shared-memory tiling 和
-流水。两条数据类型路线始终分别报告。
+`128×64×16/8×4`；任意非对齐尺寸回退到标量边界 kernel。FP16 最终选择 v8：
+regular-M 使用 `128×128×16` WMMA tile，`16≤M<128` 使用 16-row 专用路径，
+M=1 和任意非对齐尺寸回退标量。两条数据类型路线始终分别报告；GEMM 阶段在此
+收口，等待审阅后再继续下一算子。
