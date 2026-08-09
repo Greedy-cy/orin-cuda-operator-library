@@ -1,8 +1,8 @@
-# GEMM：从朴素 FP32 实现开始
+# GEMM：从朴素 FP32 到 FP16 Tensor Core
 
 本目录实现行主序矩阵乘法 `C[M,N] = A[M,K] × B[K,N]`。当前阶段只保留
-standalone CUDA/C++ benchmark；每版同时运行自定义 kernel 和 cuBLAS FP32
-参考实现，分别用 CUDA Event 多次计时并取 median。
+standalone CUDA/C++ benchmark；每版同时运行自定义 kernel 和相同数据类型的
+cuBLAS 参考，分别用 CUDA Event 多次计时并取 median。
 
 ```bash
 mkdir -p build profiles
@@ -11,7 +11,7 @@ nvcc -O3 -lineinfo -std=c++17 -arch=sm_87 gemm_v0.cu -o build/gemm_v0 -lcublas
 ./build/gemm_v0 --m=37 --n=65 --k=1003
 ```
 
-## 实测记录
+## FP32 实测记录
 
 | 版本 | 优化点 | `4096³` | 性能 | 相对 v0 | cuBLAS 占比 | 关键瓶颈 |
 |---|---|---:|---:|---:|---:|---|
@@ -32,9 +32,22 @@ nvcc -O3 -lineinfo -std=c++17 -arch=sm_87 gemm_v0.cu -o build/gemm_v0 -lcublas
 [`reports/v5.md`](reports/v5.md)；配置资源表、跨形状筛选、dispatcher 和稳定性见
 [`reports/v6.md`](reports/v6.md)。
 
+## FP16 Tensor Core 实测记录
+
+输入为 FP16，Tensor Core/参考实现均使用 FP32 accumulation，输出为 FP32；该表
+与 FP32 表使用不同 cuBLAS 口径，二者比例不能混用。
+
+| 版本 | 优化点 | `4096³` | 性能 | 相对 v7 | FP16 cuBLAS 占比 | 关键瓶颈 |
+|---|---|---:|---:|---:|---:|---|
+| v7 | 一 warp 计算一个 `16×16×16` WMMA tile，直接从 global memory 加载 | 140.987 ms | 974.836 GFLOP/s | 1.00× | 12.29% | L1/TEX throughput 99.76%；long scoreboard 占 92.8%；跨 warp 不复用 A/B |
+
+v7 的 FP16 精度口径、完整形状与 Nsight 证据见
+[`reports/v7.md`](reports/v7.md)。
+
 ## 当前选择
 
 v6 是 FP32 最终 standalone 版本。自动 dispatcher 选择：M=1 使用
 `1×256×16/1×1`，M≤16 使用 `16×128×16/1×8`，其余对齐形状使用
-`128×64×16/8×4`；任意非对齐尺寸回退到标量边界 kernel。FP32 路线在此收口，
-下一阶段 v7/v8 转向 FP16 Tensor Core，不再用 FP32 CUDA core 数据混充结果。
+`128×64×16/8×4`；任意非对齐尺寸回退到标量边界 kernel。FP16 v7 是刻意保留
+全局加载瓶颈的 WMMA baseline；v8 将加入 block-level shared-memory tiling 和
+流水。两条数据类型路线始终分别报告。
