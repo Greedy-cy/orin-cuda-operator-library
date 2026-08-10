@@ -50,11 +50,25 @@ v4 的双 key 依赖链实验、短序列收益和长序列负优化见
 | 版本 | 优化点 | 主形状 | Median | Dense 性能 | 相对 FP32 v5 | FP16 cuDNN 占比 | 关键瓶颈 |
 |---|---|---|---:|---:|---:|---:|---|
 | v6 | 16x16 WMMA QK/PV，FP32 online `(m,l,O)`，FP16 probability tile | B=1,H=12,S=1024,D=128 | **20.733 ms** | **310.737 GFLOP/s** | **1.80x** | 待 v7 统一接口 | shared load 4-way/store 2-way conflict；barrier stall 36%，QK 仅 warp0 工作 |
+| v7.0 | padded layout + D/16 warps 并行 partial QK 后归并（`--config=1`） | B=1,H=12,S=1024,D=128 | 27.818 ms | 231.620 GFLOP/s | 1.34x | 不可比，见审计 | shared 冲突下降，但 partial store/load、归并与同步使其比 v6 慢 25.5% |
+| v7.1 | 仅 padded shared layout，恢复单 warp 直接 QK（默认） | B=1,H=12,S=1024,D=128 | 21.634 ms | 297.766 GFLOP/s | 1.73x | 不可比，见审计 | excessive shared wavefront 约 59%→13%，但指令数 +22.9%、occupancy 下降，主形状慢 4.35% |
 
 v6 的量化参考、Tensor Core 正确性、sanitizer 和 NCU shared 冲突证据见
-[`reports/v6.md`](reports/v6.md)。
+[`reports/v6.md`](reports/v6.md)。v7.0/v7.1 的逐步实现、负优化、Nsight 对照、
+最终稳定性、S=4096 压力测试和 cuDNN 可比性审计见
+[`reports/v7.md`](reports/v7.md)。
 
-## 当前下一步
+## 阶段结论
 
-v7 将使用 padded shared layout，并让 D/16 个 warps 并行计算 QK 分片；随后补齐
-D64/D128、causal/non-causal dispatcher、统一 FP16 参考对比和最终稳定性。
+当前 FP16 final 选择 **v6**。v7.0 与 v7.1 均保留为有完整证据的负优化：前者主
+形状比 v6 慢 25.5%，后者慢 4.35%；短序列 causal 的最高收益只有 2.9%，未达到
+3% 采用门槛。
+
+v6 主形状五次独立进程 median 为 20.7866–20.8246 ms，极差约 0.18%。相对 FP32
+naive v0 的端到端演进加速为 11.45x；该倍数包含 FP32→FP16 dtype 变化，不能描述
+为同精度 kernel 加速。主形状消除了 48 MiB 的 `[B,H,S,S]` score 缓冲；S=4096
+压力测试为 223.637 ms，正确性 PASS。
+
+设备现有开发包没有 cuDNN Frontend SDPA headers，旧 legacy MHA wrapper 又与当前
+FP16 median 口径不可比，因此 cuDNN 百分比明确留空，不进入简历。FlashAttention
+standalone 阶段到此暂停，等待确认后再决定是否进入统一依赖与工程化阶段。
