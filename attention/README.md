@@ -26,13 +26,13 @@ causal/non-causal 结果可按同一口径观察；这不代表 causal 实际执
 | 版本 | 优化点 | 主形状 | Median | Dense 性能 | 相对 v0 | cuDNN 占比 | 关键瓶颈 |
 |---|---|---|---:|---:|---:|---:|---|
 | v0 | 三 kernel：QK、串行稳定 Softmax、PV；显式 `[B,H,S,S]` FP32 缓冲 | B=1,H=12,S=1024,D=128 | 237.441 ms | 27.133 GFLOP/s | 1.00x | 延后到稳定公共评测代码 | QK 占 GPU kernel 时间 81.6%；L1/TEX 98.41%，85% global sectors 冗余 |
+| v1 | warp 协作 dot-product、Q shared staging、QK+block Softmax 融合；仍显式保存概率 | B=1,H=12,S=1024,D=128 | **53.031 ms** | **121.484 GFLOP/s** | **4.48x** | 延后到 v2 common | L1/TEX 降到 44.77%，issue slots 升至 65.21%；global probability store 和 S² 缓冲仍存在 |
 
 v0 的正确性、全形状、显存、sanitizer 与 Nsight 证据见
-[`reports/v0.md`](reports/v0.md)。
+[`reports/v0.md`](reports/v0.md)。v1 的合并访问、融合收益及 v0/v1 NCU 对照见
+[`reports/v1.md`](reports/v1.md)。
 
 ## 当前下一步
 
-v1 只改变一个因素：以 warp 协作 dot-product 让 Q/K 读取合并，并把 QK 与 block
-Softmax 合入一个 kernel；仍把概率矩阵写入 global memory，PV 保持独立。这样可以
-分离“访存/融合”的收益和 v2 online-softmax 不落盘的收益。
-
+v2 将第一次移除 `[B,H,S,S]`：按 query/key tile 流式扫描 K/V，在 FP32 中维护
+online-softmax 的 `(m,l,O)` 状态，不把 score/probability 写回 global memory。
