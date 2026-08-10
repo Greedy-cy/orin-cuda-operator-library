@@ -27,12 +27,14 @@ causal/non-causal 结果可按同一口径观察；这不代表 causal 实际执
 |---|---|---|---:|---:|---:|---:|---|
 | v0 | 三 kernel：QK、串行稳定 Softmax、PV；显式 `[B,H,S,S]` FP32 缓冲 | B=1,H=12,S=1024,D=128 | 237.441 ms | 27.133 GFLOP/s | 1.00x | 延后到稳定公共评测代码 | QK 占 GPU kernel 时间 81.6%；L1/TEX 98.41%，85% global sectors 冗余 |
 | v1 | warp 协作 dot-product、Q shared staging、QK+block Softmax 融合；仍显式保存概率 | B=1,H=12,S=1024,D=128 | **53.031 ms** | **121.484 GFLOP/s** | **4.48x** | 延后到 v2 common | L1/TEX 降到 44.77%，issue slots 升至 65.21%；global probability store 和 S² 缓冲仍存在 |
+| v2 | `BM=8,BN=32` K/V shared tiling + FP32 online softmax；不保存 S² | B=1,H=12,S=1024,D=128 | 56.124 ms | 114.790 GFLOP/s | 4.23x | 待统一 cuDNN 接口 | non-causal 比 v1 慢 5.8%，但 causal 快 1.32x；compute 86.45%，active lanes 仅 23.9/warp |
 
 v0 的正确性、全形状、显存、sanitizer 与 Nsight 证据见
 [`reports/v0.md`](reports/v0.md)。v1 的合并访问、融合收益及 v0/v1 NCU 对照见
-[`reports/v1.md`](reports/v1.md)。
+[`reports/v1.md`](reports/v1.md)。v2 的 online-softmax 推导、显存下降、负优化与
+完整资源证据见 [`reports/v2.md`](reports/v2.md)。
 
 ## 当前下一步
 
-v2 将第一次移除 `[B,H,S,S]`：按 query/key tile 流式扫描 K/V，在 FP32 中维护
-online-softmax 的 `(m,l,O)` 状态，不把 score/probability 写回 global memory。
+v3 将扫描 BM/BN 组合，分别观察 D=64/128 与 causal/non-causal。重点不是盲目追求
+更大 tile，而是平衡 K/V 复用、shared 容量、barrier 次数、active lanes 和 occupancy。
