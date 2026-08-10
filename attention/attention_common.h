@@ -24,6 +24,7 @@ struct AttentionOptions {
     int b = 1, h = 8, s = 128, d = 64;
     bool causal = false;
     bool extreme = false;
+    int config = -1;
     int warmup = 5, repeat = 15;
 
     static AttentionOptions parse(int argc, char** argv)
@@ -41,6 +42,7 @@ struct AttentionOptions {
             else if (key == "--d") o.d = value;
             else if (key == "--causal") o.causal = value != 0;
             else if (key == "--extreme") o.extreme = value != 0;
+            else if (key == "--config") o.config = value;
             else if (key == "--warmup") o.warmup = value;
             else if (key == "--repeat") o.repeat = value;
         }
@@ -152,7 +154,6 @@ inline void attention_cpu_reference(const AttentionOptions& o,
         }
     }
 }
-
 struct AttentionCheckResult {
     bool correct = true;
     bool cpu_verified = false;
@@ -226,4 +227,3 @@ inline void attention_report(const char* version, const char* path,
                 check.cpu_verified ? "cpu_double" : "finite_output",
                 check.max_abs, check.max_rel, check.correct ? "PASS" : "FAIL");
 }
-
