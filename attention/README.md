@@ -29,14 +29,17 @@ causal/non-causal 结果可按同一口径观察；这不代表 causal 实际执
 | v1 | warp 协作 dot-product、Q shared staging、QK+block Softmax 融合；仍显式保存概率 | B=1,H=12,S=1024,D=128 | **53.031 ms** | **121.484 GFLOP/s** | **4.48x** | 延后到 v2 common | L1/TEX 降到 44.77%，issue slots 升至 65.21%；global probability store 和 S² 缓冲仍存在 |
 | v2 | `BM=8,BN=32` K/V shared tiling + FP32 online softmax；不保存 S² | B=1,H=12,S=1024,D=128 | 56.124 ms | 114.790 GFLOP/s | 4.23x | 待统一 cuDNN 接口 | non-causal 比 v1 慢 5.8%，但 causal 快 1.32x；compute 86.45%，active lanes 仅 23.9/warp |
 | v3 | 扫描 BM/BN；D128 选 `32x32`，长序列 D64 选 `16x64` | B=1,H=12,S=1024,D=128 | **43.216 ms** | **149.076 GFLOP/s** | **5.50x** | 待统一 cuDNN 接口 | 比 v2 快 1.30x；40 registers、无 spill，66.7% occupancy 仍优于高 occupancy 小 BM |
+| v4 | 两个独立 dot accumulators，共同更新一次 online `(m,l,O)` | B=1,H=12,S=1024,D=128 | 43.506 ms | 148.081 GFLOP/s | 5.46x | 待统一 cuDNN 接口 | S128 快 7.5%，但主形状慢 0.7%；42 registers，长序列不采用 |
 
 v0 的正确性、全形状、显存、sanitizer 与 Nsight 证据见
 [`reports/v0.md`](reports/v0.md)。v1 的合并访问、融合收益及 v0/v1 NCU 对照见
 [`reports/v1.md`](reports/v1.md)。v2 的 online-softmax 推导、显存下降、负优化与
 完整资源证据见 [`reports/v2.md`](reports/v2.md)。v3 的完整配置扫描、dispatcher
 和 Nsight 对照见 [`reports/v3.md`](reports/v3.md)。
+v4 的双 key 依赖链实验、短序列收益和长序列负优化见
+[`reports/v4.md`](reports/v4.md)。
 
 ## 当前下一步
 
-v4 将每次 online-softmax 更新从一个 key 改为一对 key：同时维护两个独立 dot
-accumulator，再合并更新 `(m,l,O)`，减少串行 rescale/exp 次数并增加指令级并行。
+v5 将尝试 16-byte vectorized K/V global load 与 `cp.async` 双缓冲，计算路径以 v3
+为长序列基线；v4 只在有充分短序列证据时作为条件路径。
