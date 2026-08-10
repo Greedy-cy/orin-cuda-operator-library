@@ -41,7 +41,20 @@ v4 的双 key 依赖链实验、短序列收益和长序列负优化见
 [`reports/v4.md`](reports/v4.md)。v5 的 cp.async group、双缓冲、fallback 和 Nsight
 证据见 [`reports/v5.md`](reports/v5.md)。
 
+## FP16 Tensor Core 实测记录
+
+以下版本将 Q/K/V 改为 FP16，QK/PV 使用 Tensor Core，online-softmax 状态和输出
+保持 FP32。该口径与上面的 FP32 表不同；“相对 v5”包含 dtype 变化，只用于说明
+端到端实现演进，不等价于同精度 kernel 优化倍数。
+
+| 版本 | 优化点 | 主形状 | Median | Dense 性能 | 相对 FP32 v5 | FP16 cuDNN 占比 | 关键瓶颈 |
+|---|---|---|---:|---:|---:|---:|---|
+| v6 | 16x16 WMMA QK/PV，FP32 online `(m,l,O)`，FP16 probability tile | B=1,H=12,S=1024,D=128 | **20.733 ms** | **310.737 GFLOP/s** | **1.80x** | 待 v7 统一接口 | shared load 4-way/store 2-way conflict；barrier stall 36%，QK 仅 warp0 工作 |
+
+v6 的量化参考、Tensor Core 正确性、sanitizer 和 NCU shared 冲突证据见
+[`reports/v6.md`](reports/v6.md)。
+
 ## 当前下一步
 
-v6 将切换为 FP16 Q/K/V、FP32 online-softmax 状态，并使用 Tensor Core/WMMA 计算
-QK/PV；这会建立新的 dtype/cuDNN 口径，不能与 FP32 表中的绝对性能比例混用。
+v7 将使用 padded shared layout，并让 D/16 个 warps 并行计算 QK 分片；随后补齐
+D64/D128、causal/non-causal dispatcher、统一 FP16 参考对比和最终稳定性。

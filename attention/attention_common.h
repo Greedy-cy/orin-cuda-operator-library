@@ -161,11 +161,13 @@ struct AttentionCheckResult {
     double max_rel = 0.0;
 };
 
-inline AttentionCheckResult attention_check(const AttentionOptions& o,
-                                            AttentionHostData& host,
-                                            const AttentionDeviceData& device)
+inline AttentionCheckResult attention_check_output(const AttentionOptions& o,
+                                                    AttentionHostData& host,
+                                                    const float* device_output,
+                                                    double atol = 1.0e-4,
+                                                    double rtol = 1.0e-4)
 {
-    CUDA_CHECK(cudaMemcpy(host.output.data(), device.output, o.tensor_bytes(),
+    CUDA_CHECK(cudaMemcpy(host.output.data(), device_output, o.tensor_bytes(),
                           cudaMemcpyDeviceToHost));
     AttentionCheckResult result;
     result.cpu_verified = o.cpu_verifiable();
@@ -183,10 +185,17 @@ inline AttentionCheckResult attention_check(const AttentionOptions& o,
             std::max(1.0e-6, std::abs(static_cast<double>(host.reference[i])));
         result.max_abs = std::max(result.max_abs, absolute);
         result.max_rel = std::max(result.max_rel, relative);
-        if (absolute > 1.0e-4 + 1.0e-4 * std::abs(host.reference[i]))
+        if (absolute > atol + rtol * std::abs(host.reference[i]))
             result.correct = false;
     }
     return result;
+}
+
+inline AttentionCheckResult attention_check(const AttentionOptions& o,
+                                            AttentionHostData& host,
+                                            const AttentionDeviceData& device)
+{
+    return attention_check_output(o, host, device.output);
 }
 
 template <typename Launch>
