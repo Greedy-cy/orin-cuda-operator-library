@@ -23,4 +23,12 @@ cudaError_t rmsnorm_f32(const float* input, const float* weight, float* output,
                         int tokens, int hidden, float epsilon,
                         cudaStream_t stream = nullptr);
 
+// Row-major C[M,N] = A[M,K] * B[K,N].
+cudaError_t gemm_f32(const float* a, const float* b, float* c, int m, int n,
+                     int k, cudaStream_t stream = nullptr);
+
+// FP16 inputs, FP32 Tensor Core accumulation and FP32 output.
+cudaError_t gemm_f16(const __half* a, const __half* b, float* c, int m, int n,
+                     int k, cudaStream_t stream = nullptr);
+
 }  // namespace operatorlib

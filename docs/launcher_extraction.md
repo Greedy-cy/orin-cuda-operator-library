@@ -48,5 +48,24 @@ compute-sanitizer --tool racecheck : 0 hazards
 compute-sanitizer --tool synccheck : 0 errors
 ```
 
-本阶段仍直接使用 `nvcc` 链接四个 `.cu`，尚未引入 CMake；等 GEMM/Attention
-launcher 均完成后再建立一次最小构建入口。
+## 4. GEMM launcher
+
+`gemm_f32` 从 v6 只提取最终 auto-dispatcher 实际会选择的三项配置，不把用于扫描
+的八项候选全部带入库：
+
+- `M=1`：`1x256x16 / 1x1`；
+- `M<=16`：`16x128x16 / 1x8`；
+- regular M：`128x64x16 / 8x4`；
+- 任一 tile 条件不满足时：`64x64x16 / 4x4` scalar boundary fallback。
+
+`gemm_f16` 保留 v8 的 `128x128x16` WMMA tiled、16-row small-M、WMMA baseline
+fallback 和任意非对齐 scalar fallback。输入为 FP16，Tensor Core/标量路径都使用
+FP32 accumulation，输出 FP32。
+
+`tests/gemm_smoke.cu` 在 non-blocking stream 上逐一触发上述八条路径，并与相同
+stream、相同 dtype 的 cuBLAS 对齐，全部 PASS。memcheck 0 errors、racecheck 0
+hazards、synccheck 0 errors。ptxas 资源与 standalone final 保持一致：FP32 regular
+107 registers、FP16 tiled 115 registers，所有路径 0 spill。
+
+本阶段仍直接使用 `nvcc` 链接 `.cu`，尚未引入 CMake；等 Attention launcher 完成
+后再建立一次最小构建入口。
