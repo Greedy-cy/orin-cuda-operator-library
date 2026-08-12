@@ -24,13 +24,15 @@ PyTorch 接入正确性与 standalone 性能数据属于两条独立证据链。
 
 ## Phase 1：Reduce / Softmax 最小注册
 
-### 实现
+### 实现（历史最小阶段）
 
 - `python/core_binding.cpp`：只承担输入校验、设备保护、输出分配、当前 stream 获取和 launcher 调用。
-- `python/load_core_extension.py`：用 `torch.utils.cpp_extension.load` JIT 编译，目标架构固定为 Orin 的 SM 8.7。
+- `python/load_core_extension.py`：用 `torch.utils.cpp_extension.load` JIT 编译。
 - `python/test_core_extension.py`：与 PyTorch reference 对齐，并覆盖非默认 stream 与错误路径。
 - 通过 `TORCH_LIBRARY(operatorlib, ...)` 声明 schema，通过 `TORCH_LIBRARY_IMPL(operatorlib, CUDA, ...)` 注册 CUDA 实现。
 - 不使用 pybind11 暴露算子；共享库加载后通过 `torch.ops.operatorlib.*` 调用。
+
+这些最小文件保留在 Phase 1 Git 提交中；Phase 2 将它们扩展并重命名为最终入口。
 
 公开接口：
 
@@ -69,8 +71,77 @@ sudo docker run --rm --runtime nvidia --ipc=host \
   python3 python/test_core_extension.py
 ```
 
-首次运行会在 `python/build/core/` 编译共享库，之后在源码未变化时复用 Ninja 构建结果。该目录被 Git 忽略。
+Phase 1 首次运行会在 `python/build/core/` 编译共享库，之后在源码未变化时复用 Ninja 构建结果。该目录被 Git 忽略。
 
-## 后续阶段
+## Phase 2：六类算子完整注册
 
-第二阶段继续复用同一注册方式，加入 Transpose、RMSNorm、FP32/FP16 GEMM 和 FP32/FP16 Attention。Attention 以 PyTorch 数学参考实现验证即可，cuDNN 不作为完成条件；当前项目只实现 forward，不承诺 autograd/backward。
+### 从最小闭环到完整接口
+
+Phase 1 证明注册方式、stream 和错误处理可行后，最终入口演变为：
+
+- `python/operatorlib_binding.cpp`
+- `python/load_extension.py`
+- `python/test_extension.py`
+
+加载器编译六个稳定的 launcher 源文件，不复制 kernel。容器预设的 `TORCH_CUDA_ARCH_LIST` 最初同时生成 SM 10.1 与 SM 8.7，虽然运行正确，但对固定目标 Orin 属于无意义编译；最终改为默认强制 SM 8.7，同时保留 `OPERATORLIB_CUDA_ARCH_LIST` 作为显式覆盖入口。
+
+### 最终 Python 接口
+
+```python
+torch.ops.operatorlib.reduce_sum(input)
+torch.ops.operatorlib.softmax(input)
+torch.ops.operatorlib.transpose(input)
+torch.ops.operatorlib.rmsnorm(input, weight, epsilon=1e-5)
+torch.ops.operatorlib.gemm(a, b)
+torch.ops.operatorlib.attention(q, k, v, causal=False)
+```
+
+| 算子 | 输入 dtype | 输出 dtype | 形状约定 |
+|---|---|---|---|
+| Reduce | FP32 | FP32 scalar | 任意非空 contiguous Tensor |
+| Softmax | FP32 | FP32 | 沿最后一维 |
+| Transpose | FP32 | FP32 | 2D `[rows,cols] -> [cols,rows]` |
+| RMSNorm | FP32 | FP32 | 最后一维为 hidden，weight 为 `[hidden]` |
+| GEMM | FP32 / FP16 | FP32 | `[M,K] @ [K,N]` |
+| Attention | FP32 / FP16 | FP32 | Q/K/V 均为 `[B,H,S,D]`，`D<=128` |
+
+FP16 GEMM 和 Attention 延续 standalone kernel 的语义：输入保留 FP16，累加/online-softmax 状态及输出使用 FP32。
+
+### 完整正确性矩阵
+
+所有用例均放在显式创建的非默认 `torch.cuda.Stream` 上执行，完成后只同步该 stream。
+
+| 算子 | dtype 与尺寸 | 覆盖路径 | 结果 |
+|---|---|---|---|
+| Reduce | FP32 `N=1,000,003` | 非对齐长度 | PASS |
+| Softmax | FP32 `[19,128]`, `[17,1024]`, `[17,1003]` | warp/block、边界、极端输入 | PASS |
+| Transpose | FP32 `[64,96]`, `[65,37]` | tiled 与边界 | PASS |
+| RMSNorm | FP32 `[3,7,1024]`, `[5,1003]` | float4 与 scalar | PASS |
+| GEMM | FP32 `(128,64,32)`, `(7,37,23)` | regular 与 scalar fallback | PASS |
+| GEMM | FP16 `(128,128,32)`, `(16,128,32)`, `(32,32,32)`, `(17,19,23)` | tiled、small-M、WMMA baseline、scalar | PASS |
+| Attention | FP32/FP16，`S=32,D=64/128` | 优化路径、causal/non-causal | PASS |
+| Attention | FP32/FP16，`S=37,D=71,causal` | 非对齐 scalar fallback | PASS |
+
+容差：FP32 GEMM `5e-4`，FP32 Attention `8e-4`，FP16 GEMM/Attention `2e-2`；Transpose 要求逐元素完全一致。另验证 dtype、contiguous、维度、矩阵乘形状、RMSNorm weight 长度和 Attention `D<=128` 的错误路径。
+
+Attention reference 由 PyTorch 的 FP32 `matmul -> scale/mask -> softmax -> matmul` 组成。它足以验证当前 forward 语义和 online softmax 数值结果；cuDNN 不作为本阶段的依赖或完成标准。
+
+### 最终复现命令
+
+```bash
+sudo docker run --rm --runtime nvidia --ipc=host \
+  -v /path/to/orin-cuda-operator-library:/workspace/operatorLib \
+  -w /workspace/operatorLib \
+  nvcr.io/nvidia/pytorch:25.06-py3-igpu \
+  python3 python/test_extension.py
+```
+
+最终共享库缓存在 `python/build/operatorlib/`，由 Ninja 增量构建，且不会进入 Git。
+
+## 当前限制
+
+- 当前仅注册 CUDA backend，不提供 CPU kernel。
+- 当前所有输入必须 contiguous，不在 binding 中隐式复制。
+- Reduce、Softmax、Transpose、RMSNorm 当前只开放 FP32。
+- GEMM 与 Attention 接受 FP32/FP16 输入并返回 FP32。
+- 当前项目定位为推理算子实验库，只实现 forward，不承诺 autograd/backward。

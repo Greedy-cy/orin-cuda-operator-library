@@ -5,7 +5,7 @@ from torch.utils.cpp_extension import load
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = ROOT / "python" / "build" / "core"
+BUILD = ROOT / "python" / "build" / "operatorlib"
 BUILD.mkdir(parents=True, exist_ok=True)
 
 os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get(
@@ -14,13 +14,17 @@ os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get(
 os.environ.setdefault("MAX_JOBS", "2")
 
 
-def load_operatorlib_core(verbose: bool = False) -> None:
+def load_operatorlib(verbose: bool = False) -> None:
     load(
-        name="operatorlib_core_ext",
+        name="operatorlib_ext",
         sources=[
-            str(ROOT / "python" / "core_binding.cpp"),
+            str(ROOT / "python" / "operatorlib_binding.cpp"),
             str(ROOT / "src" / "reduce.cu"),
             str(ROOT / "src" / "softmax.cu"),
+            str(ROOT / "src" / "transpose.cu"),
+            str(ROOT / "src" / "rmsnorm.cu"),
+            str(ROOT / "src" / "gemm.cu"),
+            str(ROOT / "src" / "attention.cu"),
         ],
         extra_include_paths=[str(ROOT / "include")],
         extra_cflags=["-O3", "-std=c++17"],
@@ -33,4 +37,4 @@ def load_operatorlib_core(verbose: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    load_operatorlib_core(verbose=True)
+    load_operatorlib(verbose=True)
