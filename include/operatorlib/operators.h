@@ -31,4 +31,16 @@ cudaError_t gemm_f32(const float* a, const float* b, float* c, int m, int n,
 cudaError_t gemm_f16(const __half* a, const __half* b, float* c, int m, int n,
                      int k, cudaStream_t stream = nullptr);
 
+// Q/K/V and output use contiguous [B,H,S,D] row-major storage.
+cudaError_t attention_f32(const float* q, const float* k, const float* v,
+                          float* output, int batch, int heads, int sequence,
+                          int head_dim, bool causal,
+                          cudaStream_t stream = nullptr);
+
+// FP16 Q/K/V, FP32 online-softmax state and FP32 output.
+cudaError_t attention_f16(const __half* q, const __half* k, const __half* v,
+                          float* output, int batch, int heads, int sequence,
+                          int head_dim, bool causal,
+                          cudaStream_t stream = nullptr);
+
 }  // namespace operatorlib

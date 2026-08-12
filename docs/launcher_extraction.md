@@ -67,5 +67,23 @@ stream、相同 dtype 的 cuBLAS 对齐，全部 PASS。memcheck 0 errors、race
 hazards、synccheck 0 errors。ptxas 资源与 standalone final 保持一致：FP32 regular
 107 registers、FP16 tiled 115 registers，所有路径 0 spill。
 
-本阶段仍直接使用 `nvcc` 链接 `.cu`，尚未引入 CMake；等 Attention launcher 完成
-后再建立一次最小构建入口。
+## 5. Attention launcher
+
+库接口不依赖 cuDNN，保留两条来自 standalone final 的实现：
+
+- `attention_f32`：v5 cp.async online-softmax。`D=64/128 && S%32=0` 使用异步
+  tiled kernel，其余走 FP32 scalar online fallback；
+- `attention_f16`：v6 FP16 WMMA QK/PV、FP32 online state/output。
+  `D=64/128 && S%16=0` 使用 WMMA，其余走 FP16-input/FP32-compute fallback。
+
+两者输入/输出布局均为连续 `[B,H,S,D]`，支持 causal/non-causal，只实现 inference
+forward，并始终不分配 S^2 score。FP32 D128 路径需要 64 KiB dynamic shared，
+launcher 在 launch 前设置对应 kernel attribute；该操作不引入 device synchronize。
+
+`tests/attention_smoke.cu` 对 FP32/FP16 分别验证 D64、D128 causal 和
+`S37,D71,causal,extreme` fallback，输入在 non-blocking stream 上传输，并与 double
+CPU reference 对齐。六条路径全部 PASS；memcheck 0 errors、racecheck 0 hazards、
+synccheck 0 errors。ptxas 与原版本一致：v5 44 registers、v6 47 registers，0 spill。
+
+至此六类 final launcher 均已提取。下一步才增加根目录最小 CMake 和库级测试入口；
+各算子目录的独立 `nvcc` 基准仍作为性能口径，不被新构建系统替代。
