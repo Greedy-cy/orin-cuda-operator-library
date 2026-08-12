@@ -23,14 +23,14 @@ nvcc -O3 -lineinfo -std=c++17 -arch=sm_87 \
 causal/non-causal 结果可按同一口径观察；这不代表 causal 实际执行了同样数量的
 有效乘加。
 
-| 版本 | 优化点 | 主形状 | Median | Dense 性能 | 相对 v0 | cuDNN 占比 | 关键瓶颈 |
-|---|---|---|---:|---:|---:|---:|---|
-| v0 | 三 kernel：QK、串行稳定 Softmax、PV；显式 `[B,H,S,S]` FP32 缓冲 | B=1,H=12,S=1024,D=128 | 237.441 ms | 27.133 GFLOP/s | 1.00x | 延后到稳定公共评测代码 | QK 占 GPU kernel 时间 81.6%；L1/TEX 98.41%，85% global sectors 冗余 |
-| v1 | warp 协作 dot-product、Q shared staging、QK+block Softmax 融合；仍显式保存概率 | B=1,H=12,S=1024,D=128 | **53.031 ms** | **121.484 GFLOP/s** | **4.48x** | 延后到 v2 common | L1/TEX 降到 44.77%，issue slots 升至 65.21%；global probability store 和 S² 缓冲仍存在 |
-| v2 | `BM=8,BN=32` K/V shared tiling + FP32 online softmax；不保存 S² | B=1,H=12,S=1024,D=128 | 56.124 ms | 114.790 GFLOP/s | 4.23x | 待统一 cuDNN 接口 | non-causal 比 v1 慢 5.8%，但 causal 快 1.32x；compute 86.45%，active lanes 仅 23.9/warp |
-| v3 | 扫描 BM/BN；D128 选 `32x32`，长序列 D64 选 `16x64` | B=1,H=12,S=1024,D=128 | **43.216 ms** | **149.076 GFLOP/s** | **5.50x** | 待统一 cuDNN 接口 | 比 v2 快 1.30x；40 registers、无 spill，66.7% occupancy 仍优于高 occupancy 小 BM |
-| v4 | 两个独立 dot accumulators，共同更新一次 online `(m,l,O)` | B=1,H=12,S=1024,D=128 | 43.506 ms | 148.081 GFLOP/s | 5.46x | 待统一 cuDNN 接口 | S128 快 7.5%，但主形状慢 0.7%；42 registers，长序列不采用 |
-| v5 | 16-byte K/V `cp.async`、两级 shared buffer；非对齐 scalar fallback | B=1,H=12,S=1024,D=128 | **37.331 ms** | **172.577 GFLOP/s** | **6.36x** | 待 FP16 同口径比较 | 比 v3 快 1.16x；44 registers、无 spill，cp.async 路径 sanitizer 全通过 |
+| 版本 | 优化点 | 主形状 | Median | Dense 性能 | 相对 v0 | 关键瓶颈 |
+|---|---|---|---:|---:|---:|---|
+| v0 | 三 kernel：QK、串行稳定 Softmax、PV；显式 `[B,H,S,S]` FP32 缓冲 | B=1,H=12,S=1024,D=128 | 237.441 ms | 27.133 GFLOP/s | 1.00x | QK 占 GPU kernel 时间 81.6%；L1/TEX 98.41%，85% global sectors 冗余 |
+| v1 | warp 协作 dot-product、Q shared staging、QK+block Softmax 融合；仍显式保存概率 | B=1,H=12,S=1024,D=128 | **53.031 ms** | **121.484 GFLOP/s** | **4.48x** | L1/TEX 降到 44.77%，issue slots 升至 65.21%；global probability store 和 S² 缓冲仍存在 |
+| v2 | `BM=8,BN=32` K/V shared tiling + FP32 online softmax；不保存 S² | B=1,H=12,S=1024,D=128 | 56.124 ms | 114.790 GFLOP/s | 4.23x | non-causal 比 v1 慢 5.8%，但 causal 快 1.32x；compute 86.45%，active lanes 仅 23.9/warp |
+| v3 | 扫描 BM/BN；D128 选 `32x32`，长序列 D64 选 `16x64` | B=1,H=12,S=1024,D=128 | **43.216 ms** | **149.076 GFLOP/s** | **5.50x** | 比 v2 快 1.30x；40 registers、无 spill，66.7% occupancy 仍优于高 occupancy 小 BM |
+| v4 | 两个独立 dot accumulators，共同更新一次 online `(m,l,O)` | B=1,H=12,S=1024,D=128 | 43.506 ms | 148.081 GFLOP/s | 5.46x | S128 快 7.5%，但主形状慢 0.7%；42 registers，长序列不采用 |
+| v5 | 16-byte K/V `cp.async`、两级 shared buffer；非对齐 scalar fallback | B=1,H=12,S=1024,D=128 | **37.331 ms** | **172.577 GFLOP/s** | **6.36x** | 比 v3 快 1.16x；44 registers、无 spill，cp.async 路径 sanitizer 全通过 |
 
 v0 的正确性、全形状、显存、sanitizer 与 Nsight 证据见
 [`reports/v0.md`](reports/v0.md)。v1 的合并访问、融合收益及 v0/v1 NCU 对照见
@@ -47,11 +47,11 @@ v4 的双 key 依赖链实验、短序列收益和长序列负优化见
 保持 FP32。该口径与上面的 FP32 表不同；“相对 v5”包含 dtype 变化，只用于说明
 端到端实现演进，不等价于同精度 kernel 优化倍数。
 
-| 版本 | 优化点 | 主形状 | Median | Dense 性能 | 相对 FP32 v5 | FP16 cuDNN 占比 | 关键瓶颈 |
-|---|---|---|---:|---:|---:|---:|---|
-| v6 | 16x16 WMMA QK/PV，FP32 online `(m,l,O)`，FP16 probability tile | B=1,H=12,S=1024,D=128 | **20.733 ms** | **310.737 GFLOP/s** | **1.80x** | 待 v7 统一接口 | shared load 4-way/store 2-way conflict；barrier stall 36%，QK 仅 warp0 工作 |
-| v7.0 | padded layout + D/16 warps 并行 partial QK 后归并（`--config=1`） | B=1,H=12,S=1024,D=128 | 27.818 ms | 231.620 GFLOP/s | 1.34x | 不可比，见审计 | shared 冲突下降，但 partial store/load、归并与同步使其比 v6 慢 25.5% |
-| v7.1 | 仅 padded shared layout，恢复单 warp 直接 QK（默认） | B=1,H=12,S=1024,D=128 | 21.634 ms | 297.766 GFLOP/s | 1.73x | 不可比，见审计 | excessive shared wavefront 约 59%→13%，但指令数 +22.9%、occupancy 下降，主形状慢 4.35% |
+| 版本 | 优化点 | 主形状 | Median | Dense 性能 | 相对 FP32 v5 | 关键瓶颈 |
+|---|---|---|---:|---:|---:|---|
+| v6 | 16x16 WMMA QK/PV，FP32 online `(m,l,O)`，FP16 probability tile | B=1,H=12,S=1024,D=128 | **20.733 ms** | **310.737 GFLOP/s** | **1.80x** | shared load 4-way/store 2-way conflict；barrier stall 36%，QK 仅 warp0 工作 |
+| v7.0 | padded layout + D/16 warps 并行 partial QK 后归并（`--config=1`） | B=1,H=12,S=1024,D=128 | 27.818 ms | 231.620 GFLOP/s | 1.34x | shared 冲突下降，但 partial store/load、归并与同步使其比 v6 慢 25.5% |
+| v7.1 | 仅 padded shared layout，恢复单 warp 直接 QK（默认） | B=1,H=12,S=1024,D=128 | 21.634 ms | 297.766 GFLOP/s | 1.73x | excessive shared wavefront 约 59%→13%，但指令数 +22.9%、occupancy 下降，主形状慢 4.35% |
 
 v6 的量化参考、Tensor Core 正确性、sanitizer 和 NCU shared 冲突证据见
 [`reports/v6.md`](reports/v6.md)。v7.0/v7.1 的逐步实现、负优化、Nsight 对照、
@@ -69,6 +69,7 @@ naive v0 的端到端演进加速为 11.45x；该倍数包含 FP32→FP16 dtype 
 为同精度 kernel 加速。主形状消除了 48 MiB 的 `[B,H,S,S]` score 缓冲；S=4096
 压力测试为 223.637 ms，正确性 PASS。
 
-设备现有开发包没有 cuDNN Frontend SDPA headers，旧 legacy MHA wrapper 又与当前
-FP16 median 口径不可比，因此 cuDNN 百分比明确留空，不进入简历。FlashAttention
-standalone 阶段到此暂停，等待确认后再决定是否进入统一依赖与工程化阶段。
+Attention 不以 cuDNN 对比作为完成条件。设备现有开发包没有 cuDNN Frontend SDPA
+headers，旧 legacy MHA wrapper 又与当前 FP16 median 口径不可比，因此不报告虚假的
+外部库比例。standalone 阶段以 custom naive 演进、显存消除、数值验证、Nsight
+证据和稳定性作为收口依据；下一阶段只提取已经稳定的 final launcher。
