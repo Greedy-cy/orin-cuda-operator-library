@@ -79,7 +79,8 @@ kernel 加速。
 ## 5. 复现命令
 
 ```bash
-cd /path/to/orin-cuda-operator-library
+git clone https://github.com/Greedy-cy/orin-cuda-operator-library.git
+cd orin-cuda-operator-library
 sudo ./tools/lock_orin_clocks.sh
 ./tools/run_final_standalone.sh smoke
 ./tools/run_final_standalone.sh benchmark

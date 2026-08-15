@@ -19,7 +19,8 @@
 ## 2. 构建
 
 ```bash
-cd /path/to/orin-cuda-operator-library
+git clone https://github.com/Greedy-cy/orin-cuda-operator-library.git
+cd orin-cuda-operator-library
 cmake -S . -B cmake-build -DCMAKE_BUILD_TYPE=Release
 cmake --build cmake-build -j2
 ctest --test-dir cmake-build --output-on-failure

@@ -20,7 +20,7 @@ Standalone kernel、launcher 和统一 CMake 基准稳定后，才开始 PyTorch
 | 容器 CUDA Toolkit | 12.9 |
 | Standalone CUDA Toolkit | 12.6.68 |
 
-PyTorch 接入正确性与 standalone 性能数据属于两条独立证据链。简历性能数字仍使用已冻结的 standalone CUDA 12.6 测量结果，不把容器 JIT 编译环境混入原有对比。
+PyTorch 接入正确性与 standalone 性能数据属于两条独立证据链。对外发布的性能数字仍使用已冻结的 standalone CUDA 12.6 测量结果，不把容器 JIT 编译环境混入原有对比。
 
 ## Phase 1：Reduce / Softmax 最小注册
 
@@ -65,7 +65,7 @@ Reduce 使用 `rtol=5e-4, atol=5e-4`，Softmax 使用 `rtol=1e-4, atol=1e-5` 与
 
 ```bash
 sudo docker run --rm --runtime nvidia --ipc=host \
-  -v /path/to/orin-cuda-operator-library:/workspace/operatorLib \
+  -v "$PWD":/workspace/operatorLib \
   -w /workspace/operatorLib \
   nvcr.io/nvidia/pytorch:25.06-py3-igpu \
   python3 python/test_core_extension.py
@@ -130,7 +130,7 @@ Attention reference 由 PyTorch 的 FP32 `matmul -> scale/mask -> softmax -> mat
 
 ```bash
 sudo docker run --rm --runtime nvidia --ipc=host \
-  -v /path/to/orin-cuda-operator-library:/workspace/operatorLib \
+  -v "$PWD":/workspace/operatorLib \
   -w /workspace/operatorLib \
   nvcr.io/nvidia/pytorch:25.06-py3-igpu \
   python3 python/test_extension.py

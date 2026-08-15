@@ -1,6 +1,8 @@
-# CUDA Operator Library
+# Orin CUDA Operator Library
 
-面向 Jetson Orin Nano Super（SM 8.7）的 CUDA 算子优化实践。项目不是从通用框架开始，而是为每个算子保留独立、可运行的 `v0 -> final`：先建立正确 baseline，再用 CUDA Event、Nsight Systems、Nsight Compute 和 compute-sanitizer 找到证据，逐项优化并记录正向与负向结果。六类 standalone kernel 稳定后，才提取 stream-aware launcher、最小 CMake 静态库和 PyTorch `TORCH_LIBRARY` 接口。
+面向 Jetson Orin Nano Super（SM 8.7）的 CUDA 推理算子实验库，覆盖 Reduce、Softmax、Transpose、RMSNorm、GEMM 与 FlashAttention-style Attention，并通过 PyTorch `TORCH_LIBRARY` 提供统一调用接口。
+
+项目从可验证的 standalone CUDA kernel 出发，使用 CUDA Event、Nsight Systems、Nsight Compute 和 compute-sanitizer 驱动优化；算子稳定后再提取 stream-aware launcher、最小 CMake 静态库和 PyTorch 接口。代码保留 `v0 -> final` 的演进与逐版本实验报告，便于复现实验结论与理解优化取舍。
 
 ## 已完成内容
 
@@ -35,7 +37,7 @@
 ## 目录
 
 ```text
-operatorLib/
+orin-cuda-operator-library/
 ├── reduce|softmax|transpose|rmsnorm|gemm|attention/
 │   ├── <operator>_v*.cu       # 可独立编译的版本演进
 │   ├── reports/v*.md          # 每版本实验报告
@@ -45,7 +47,7 @@ operatorLib/
 ├── tests/                     # launcher 的 CUDA/stream/sanitizer smoke tests
 ├── python/                    # TORCH_LIBRARY binding、JIT loader、PyTorch 对齐测试
 ├── tools/                     # 锁频与统一复验脚本
-├── docs/                      # 冻结数据、提取、构建、接入和简历材料
+├── docs/                      # 性能口径、launcher、构建与接入记录
 └── CMakeLists.txt             # final launcher 稳定后加入的最小构建
 ```
 
@@ -54,7 +56,8 @@ operatorLib/
 ### 1. Standalone final
 
 ```bash
-cd /path/to/orin-cuda-operator-library
+git clone https://github.com/Greedy-cy/orin-cuda-operator-library.git
+cd orin-cuda-operator-library
 ./tools/run_final_standalone.sh smoke
 
 # 只有记录正式性能时才需要锁频
@@ -76,7 +79,7 @@ ctest --test-dir cmake-build --output-on-failure
 
 ```bash
 sudo docker run --rm --runtime nvidia --ipc=host \
-  -v /path/to/orin-cuda-operator-library:/workspace/operatorLib \
+  -v "$PWD":/workspace/operatorLib \
   -w /workspace/operatorLib \
   nvcr.io/nvidia/pytorch:25.06-py3-igpu \
   python3 python/test_extension.py
@@ -90,5 +93,14 @@ sudo docker run --rm --runtime nvidia --ipc=host \
 - [Final launcher 提取与 sanitizer](docs/launcher_extraction.md)
 - [最小 CMake 构建](docs/library_build.md)
 - [PyTorch TORCH_LIBRARY 接入](docs/pytorch_extension.md)
-- [简历描述与数字使用边界](docs/resume.md)
-- [面试讲解提纲](docs/interview.md)
+
+## 适用范围
+
+- 目标架构为 Jetson Orin Nano Super 的 SM 8.7，当前只提供推理 forward。
+- Reduce、Softmax、Transpose 与 RMSNorm 的公开接口使用 FP32；GEMM 与 Attention 支持 FP32/FP16 输入并使用 FP32 输出或累加状态。
+- 输入必须位于 CUDA 设备、布局连续且 dtype 满足接口约束；binding 不会隐式复制输入。
+- Attention 结果以 custom baseline、显存复杂度、正确性和 Nsight 证据为准，不宣称与官方 FlashAttention 或 cuDNN Attention 等价。
+
+## License
+
+本项目采用 [MIT License](LICENSE)。
